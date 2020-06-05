@@ -1,7 +1,8 @@
-import React, { useEffect, useState, ChangeEvent } from 'react';
-import { Link } from 'react-router-dom'
+import React, { useEffect, useState, ChangeEvent, FormEvent } from 'react';
+import { Link, useHistory } from 'react-router-dom'
 import { FiArrowLeft } from 'react-icons/fi'
-import { Map, TileLayer, Marker } from 'react-leaflet'
+import { Map, TileLayer, Marker } from 'react-leaflet';
+import { LeafletMouseEvent } from 'leaflet';
 import axios from 'axios';
 
 import API from '../../Services/API';
@@ -19,11 +20,28 @@ interface IBGEUFResponse {
     sigla: string
 }
 
+interface IBGECityResponse {
+    nome: string
+}
+
 const CreatePoint = () => {
     const [itens, setItens] = useState<Item[]>([]);
     const [ufs, setUFs] = useState<string[]>([]);
+    const [nameCitys, setNameCitys] = useState<string[]>([]);
 
-    const [selectedUf, setSelectedUF] = useState('');
+    const [formData, setFormData] = useState({
+        name: '',
+        email: '',
+        whatsapp: ''
+    })
+
+    const [selectUf, setSelectUF] = useState('');
+    const [selectCity, setSelectCity] = useState('');
+    const [selectPosition, setSelectPosition] = useState<[number, number]>([0, 0]);
+    const [selectItens, setSelectItens] = useState<number[]>([]);
+    const [initialPosition, setInitialPosition] = useState<[number, number]>([0, 0]);
+
+    const history = useHistory();
 
     useEffect(() => {
         API.get('itens').then(response => {
@@ -32,17 +50,81 @@ const CreatePoint = () => {
     }, []);
 
     useEffect(() => {
-        axios.get<IBGEUFResponse[]>('https://servicodados.ibge.gov.br/api/v1/localidades/estados').then(response => {
-            setUFs(response.data.map(uf => uf.sigla))
-        })
+        axios
+            .get<IBGEUFResponse[]>('https://servicodados.ibge.gov.br/api/v1/localidades/estados')
+            .then(response => {
+                setUFs(response.data.map(uf => uf.sigla))
+            })
     }, [])
 
     useEffect(() => {
+        if (selectUf === '0') {
+            return;
+        }
+        axios
+            .get<IBGECityResponse[]>(`https://servicodados.ibge.gov.br/api/v1/localidades/estados/${selectUf}/distritos`)
+            .then(response => {
+                setNameCitys(response.data.map(city => city.nome))
+            })
+    }, [selectUf])
 
-    })
+    useEffect(() => {
+        navigator.geolocation.getCurrentPosition(position => {
+            setInitialPosition([position.coords.latitude, position.coords.longitude])
+        })
+    }, [])
 
-    function handleSelectedUf(event: ChangeEvent<HTMLSelectElement>){
-        setSelectedUF(event.target.value)
+    function handleselectUf(event: ChangeEvent<HTMLSelectElement>) {
+        setSelectUF(event.target.value);
+    }
+
+    function handleselectCity(event: ChangeEvent<HTMLSelectElement>) {
+        setSelectCity(event.target.value);
+    }
+
+    function handleMapClick(event: LeafletMouseEvent) {
+        setSelectPosition([
+            event.latlng.lat,
+            event.latlng.lng
+        ])
+    }
+
+    function handleInputChange(event: ChangeEvent<HTMLInputElement>) {
+        setFormData({ ...formData, [event.target.name]: event.target.value })
+    }
+
+    function handleSelectItem(id: number) {
+        const alreadySelected = selectItens.findIndex(item => item === id);
+
+        if (alreadySelected >= 0) {
+            const filteredItens = selectItens.filter(item => item !== id);
+
+            setSelectItens(filteredItens);
+        }
+        else {
+            setSelectItens([...selectItens, id]);
+        }
+    }
+
+    async function handleSubmit(event: FormEvent) {
+        event.preventDefault();
+
+        const { name, email, whatsapp } = formData;
+        const uf = selectUf;
+        const city = selectCity;
+        const [latitude, longitude] = selectPosition;
+        const itens = selectItens;
+
+        const data = {
+            name, email, whatsapp,
+            uf, city, latitude, longitude, itens
+        }
+
+        await API.post('points', data);
+
+        alert('Ponto de Coleta Criado');
+
+        history.push('/');
     }
 
     return (
@@ -53,7 +135,7 @@ const CreatePoint = () => {
                 <Link to="/"><FiArrowLeft />Voltar para Home</Link>
             </header>
 
-            <form>
+            <form onSubmit={handleSubmit}>
                 <h1>Cadastro do <br /> Ponto de Coleta</h1>
 
                 <fieldset>
@@ -67,6 +149,7 @@ const CreatePoint = () => {
                             type="text"
                             name="name"
                             id="name"
+                            onChange={handleInputChange}
                         />
                     </div>
 
@@ -77,6 +160,7 @@ const CreatePoint = () => {
                                 type="email"
                                 name="email"
                                 id="email"
+                                onChange={handleInputChange}
                             />
                         </div>
                         <div className="field">
@@ -85,6 +169,7 @@ const CreatePoint = () => {
                                 type="text"
                                 name="whatsapp"
                                 id="whatsapp"
+                                onChange={handleInputChange}
                             />
                         </div>
                     </div>
@@ -96,18 +181,22 @@ const CreatePoint = () => {
                         <span>Selecione o Endereço no Mapa</span>
                     </legend>
 
-                    <Map center={[-21.7736908, -48.1587392]} zoom={15}>
+                    <Map center={initialPosition} zoom={15} onclick={handleMapClick}>
                         <TileLayer
-                            attribution='&amp;copy <a href="http://osm.org/copyright">OpenStreetMap</a> contributors'
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                         />
-                        <Marker position={[-21.7736908, -48.1587392]} />
+                        <Marker position={selectPosition} />
                     </Map>
 
                     <div className="field-group">
                         <div className="field">
                             <label htmlFor="uf">Estado (UF)</label>
-                            <select name="uf" id="uf" value={selectedUf} onChange={handleSelectedUf}>
+                            <select
+                                name="uf"
+                                id="uf"
+                                value={selectUf}
+                                onChange={handleselectUf}
+                            >
                                 <option hidden> Selecione uma UF </option>
                                 {
                                     ufs.map(uf => (
@@ -119,8 +208,18 @@ const CreatePoint = () => {
 
                         <div className="field">
                             <label htmlFor="city">Cidade</label>
-                            <select name="city" id="city">
+                            <select
+                                name="city"
+                                id="city"
+                                onChange={handleselectCity}
+                                value={selectCity}
+                            >
                                 <option hidden> Selecione uma Cidade </option>
+                                {
+                                    nameCitys.map(citys => (
+                                        <option key={citys} value={citys}>{citys}</option>
+                                    ))
+                                }
                             </select>
                         </div>
                     </div>
@@ -134,7 +233,11 @@ const CreatePoint = () => {
 
                     <ul className="itens-grid">
                         {itens.map((item) => (
-                            <li key={item.id}>
+                            <li
+                                key={item.id}
+                                onClick={() => handleSelectItem(item.id)}
+                                className={selectItens.includes(item.id) ? 'selected' : ''}
+                            >
                                 <img src={item.image_url} alt={item.title} />
                                 <span>{item.title}</span>
                             </li>
