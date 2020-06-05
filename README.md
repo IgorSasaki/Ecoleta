@@ -30,3 +30,6 @@ Show: Listar específico;
 Store: Salvar informação;  
 Update: Atualizar informação;  
 Destroy: Excluir informação.
+
+## Anotações sobre Estado
+Array ou Objeto: Manualmente informar o tipo da váriavel
